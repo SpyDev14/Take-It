@@ -1,8 +1,6 @@
-import requests
-import json
-from fastapi import FastAPI, File, UploadFile
 from info import WorkMode, Info
 from utils import is_null_or_whitespace
+from fastapi import FastAPI, WebSocket
 
 def incorrect_input():
 	print("Неправильный ввод!")
@@ -18,13 +16,14 @@ print(f"\nДобро пожаловать в Take It!\n")
 while True:
 	answer = input("Выберите режим работы\n 0 - GET\n 1 - SEND\n>>> ").strip().lower()
 
-	if answer in("0", "get"):
+	if answer in ("0", "get", 'g'):
 		work_mode = WorkMode.GET
 		break
 
-	elif answer in("1", "send"):
+	elif answer in ("1", "send", 's'):
 		work_mode = WorkMode.SEND
 		break
+
 
 	incorrect_input()
 
@@ -39,14 +38,5 @@ while True:
 	break
 
 info = Info(user_name, work_mode)
-info.print_info()
-
-del work_mode, user_name
-
-## START FastAPI
-app = FastAPI()
-
-@app.get('takeit/info/')
-async def get_info():
-	return {}
+del user_name, work_mode
 
