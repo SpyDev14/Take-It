@@ -86,9 +86,12 @@ class NotifyType(Enum):
 	FATL: str = Fore.MAGENTA
 
 notify_shell: str = '[{0}]'
-def print_notify(message: str, notify_type: NotifyType = NotifyType.INFO, start_with = '\r') -> None:
-	print(f"{start_with}{notify_shell.format(f'{notify_type.value}{notify_type.name}{Fore.RESET}')} {message}")
+def print_notify(message: str, notify_type: NotifyType = NotifyType.INFO, start_with = '\r', ends_with='\n') -> str:
+	msg = f"{start_with}{notify_shell.format(f'{notify_type.value}{notify_type.name}{Fore.RESET}')} {message}"
+	print(msg, end=ends_with)
+	return msg
 
+##MARK: START
 if __name__ == '__main__':
 	msg: str = "lazy dog"
 	print_notify(msg)

@@ -1,20 +1,22 @@
 from websockets            import connect, ClientConnection, Data
-from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
+from websockets.exceptions import ConnectionClosed, ConnectionClosedOK
 from requests              import Response
 from typing                import Dict, Callable, Tuple, List
-from colorama              import Fore
-import asyncio, requests, json, time, colorama
+from colorama              import Fore, Style
+from aioconsole            import ainput
+import asyncio, requests, time, colorama
 
 from shared                import WorkMode, Info, ClientState 
 from shared                import ClientsModel, ClientModel
 from shared                import MessageType, MessageModel, ClientConnectedMessageModel, ClientDisconnectedMessageModel
+from shared                import INVALID_CHARACTERS, is_valid_name
 from utils                 import is_null_or_whitespace, print_notify, NotifyType, play_simboll_animation, PreparedAnimations
 
 ## Функции
 def incorrect_input():
 	print_notify("Неправильный ввод!", NotifyType.ERRO)
 
-## START
+##MARK: START
 server_ip: str = '127.0.0.1:8000'
 work_mode: WorkMode | None = None
 user_name: str      | None = None
@@ -22,12 +24,12 @@ DEBUG: bool = True
 
 colorama.init()
 
-## IF DEBUG
+##MARK: IF DEBUG
 # user_name = "Николае Чаушеско"
 # work_mode = WorkMode.SENDER
 
 
-print(f"\nДобро пожаловать в Take It!\n")
+print(f"\nДобро пожаловать в {Fore.CYAN}Take It{Fore.RESET}!\n")
 
 while user_name == None:
 	answer = input("Укажите своё имя: ")
@@ -67,26 +69,32 @@ mode: {Fore.CYAN}{info.work_mode.name}{Fore.RESET}
 
 
 
-## RECIEVER
+##MARK: RECIEVER LOGIC
 async def receiver_logic(ws: ClientConnection):
 	anim_task = asyncio.create_task(play_simboll_animation("Ожидание файла"))
-	while True:
-		data: str = await ws.recv()
+	try:
+		while True:
+			data: str = await ws.recv()
 
-		msg_type = MessageModel.model_validate_json(data).type
+			msg_type = MessageModel.model_validate_json(data).type
 
-		if (msg_type.name == 'dd'):
-			print(data)
-	# anim_task.cancel()
-	# await anim_task
+			if (msg_type.name == 'dd'):
+				print(data)
+		# anim_task.cancel()
+		# await anim_task
+	except ConnectionClosed as e:
+		raise e
+	
+	except:
+		pass
 
 
 
-
-
-
-## SENDER
+##MARK: SENDER LOGIC
 suitable_clients: Dict[str, ClientModel] = {}
+
+def print_send_file_command_info():
+	print_notify(f"Чтобы отправить: {Fore.CYAN}send{Fore.RESET} <{Fore.CYAN}receiver: name | address{Fore.RESET}> <{Fore.CYAN}path: file | dirr{Fore.RESET}>")
 
 def is_client_suitable(client: ClientModel) -> bool:
 	return (
@@ -129,7 +137,9 @@ def print_client(client: ClientModel, *, label: str | None = None):
 		print(label)
 	print(f"{'\n'.join(msg_lines)}\n")
 
-## START: WS MESSAGES HANDLING
+
+
+##MARK: WS MESSAGES HANDLING
 async def on_client_connected(msg: str):
 	client: ClientModel = ClientConnectedMessageModel.model_validate_json(msg).connected_client
 					
@@ -138,7 +148,7 @@ async def on_client_connected(msg: str):
 	
 	# MARK: возможно будут баги
 	suitable_clients[client.info.user_name] = client
-	print_client(client, label=f'{Fore.GREEN}Новый пользователь:{Fore.RESET}')
+	print_client(client, label=f'{Fore.GREEN}\nНовый пользователь{Fore.RESET}')
 
 async def on_client_disconnected(msg: str):
 	client: ClientModel = ClientDisconnectedMessageModel.model_validate_json(msg).disconnected_client
@@ -147,10 +157,10 @@ async def on_client_disconnected(msg: str):
 	if client in suitable_clients.values():
 		del suitable_clients[client.info.user_name]
 
-		print_notify(f"Пользователь {client.info.user_name} отключился", NotifyType.WARN)
+		print_notify(f"Пользователь \"{Fore.CYAN}{client.info.user_name}{Fore.RESET}\" отключился", NotifyType.WARN)
 
 async def ws_message_handler(ws: ClientConnection):
-	MESSAGE_HANDLERS: Dict[MessageType, Callable[[MessageModel], None]] = {
+	MESSAGE_HANDLERS: Dict[MessageType, Callable[[str], None]] = {
 		MessageType.CLIENT_CONNECTED    : on_client_connected,
 		MessageType.CLIENT_DISCONNECTED : on_client_disconnected
 	}
@@ -168,31 +178,92 @@ async def ws_message_handler(ws: ClientConnection):
 			await task
 
 	except asyncio.CancelledError:
-		await task
+		if task:
+			await task
 
 ## END: WS MESSAGES HANDLING
 
 
+
+##MARK: COMMAND HANDLER
+### START: COMMANDS
+
+async def send_command(raw_input: str, ws: ClientConnection) -> bool:
+	args: List[str] = raw_input.split(' ')
+
+	receiver: str | None = None
+	path:     str | None = None
+
+	del args[0]
+
+	if len(args) < 2:
+		print_notify("Необходимо указать имя\\адрес клиента, а также путь до файла\\папки", NotifyType.ERRO)
+		return False
+	
+	if len(args >= 2):
+		receiver = args[0]
+		path = args[1]
+
+	if len(args > 2):
+		pass
+
+	print_notify("Method send_file() not implemented", NotifyType.DEBG)
+	return False
+
+async def help_command(args: str, ws: ClientConnection) -> bool:
+	print_send_file_command_info()
+	return True
+
+### END: COMMANDS
+
+async def command_handler(ws: ClientConnection):
+	COMMANDS: Dict[str, Callable[[str, ClientConnection], bool]] = {
+		"send" : send_command,
+		"help" : help_command
+	}
+
+	raw_input:    str | None = None
+	command_name: str | None = None
+	task = None
+
+	try:
+		while True:
+			raw_input = await ainput(">>> ")
+
+			if is_null_or_whitespace(raw_input):
+				continue
+			
+			command_name = raw_input.split(' ')[0]
+
+			if command_name not in COMMANDS:
+				incorrect_input()
+				continue
+
+			task = asyncio.create_task(COMMANDS[command_name](raw_input, ws))
+			await task
+			
+	except asyncio.CancelledError:
+		if task:
+			await task
+	except EOFError:
+		pass
+## END: COMMAND HANDLER
+
+
+
 async def sender_logic(ws: ClientConnection):
-	MIN_ANIM_TIME: float = 0.5
-
-	print("\nПользователи:")
-
+	COLUMN_WIDTH:  int   = 0
+	
+	print(f"\n{Style.BRIGHT}{"Доступные пользователи":^{COLUMN_WIDTH}}{Style.RESET_ALL}")
+	
 	async with asyncio.TaskGroup() as tg:
-		start_time: float = time.perf_counter()
 		anim_task = tg.create_task(play_simboll_animation("Поиск..."))
-
+		
 		resp: Response = await asyncio.to_thread(requests.get, f"http://{server_ip}/clients/")
 		clients = ClientsModel.model_validate_json(resp.text).clients
-
-		suitable_clients = {name: client for name, client in clients.items() if is_client_suitable(client)}
-
-		## Anim logic
-		delta_time: float = time.perf_counter() - start_time
 		
-		if delta_time < MIN_ANIM_TIME:
-			await asyncio.sleep(MIN_ANIM_TIME - delta_time)
-
+		suitable_clients = {name: client for name, client in clients.items() if is_client_suitable(client)}
+		
 		anim_task.cancel()
 	
 	# Отрисовка пользователей
@@ -201,17 +272,22 @@ async def sender_logic(ws: ClientConnection):
 			print_client(client)
 	else:
 		print_notify("Пользователей, подходящих для отправки сейчас нет", NotifyType.ERRO)
-		
-	await ws_message_handler(ws)
+	
+	print_send_file_command_info()
+
+	ws_messahe_handling = asyncio.create_task(ws_message_handler(ws))
+	command_handling    = asyncio.create_task(command_handler(ws))
+	
+	await ws_messahe_handling
+	await command_handling
 
 
-logics: Dict[WorkMode, Callable[[ClientConnection], None]] = {
+client_logics: Dict[WorkMode, Callable[[ClientConnection], None]] = {
 	WorkMode.RECEIVER : receiver_logic,
 	WorkMode.SENDER   :   sender_logic
 }
 
-
-## MAIN
+##MARK: MAIN
 async def main():
 	anim_task = asyncio.create_task(play_simboll_animation("Подключение к серверу..."))
 	try:
@@ -222,13 +298,13 @@ async def main():
 			print_notify("Установлено соединение с сервером")
 			await ws.send(f"{info.to_model().model_dump_json()}")
 			
-			await logics[info.work_mode](ws)
+			await client_logics[info.work_mode](ws)
 
 	# ошибки, которые могут возникнуть до подключения
 	except (TimeoutError, ConnectionRefusedError) as e:
 		anim_task.cancel()
 		await anim_task
-
+		
 		if isinstance(e, TimeoutError):
 			print_notify("Превышено время ожидания ответа от сервера", NotifyType.FATL)
 		else:
