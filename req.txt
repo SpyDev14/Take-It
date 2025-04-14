@@ -3,3 +3,5 @@ requests
 websockets
 colorama
 pytest
+aioconsole
+setuptools
