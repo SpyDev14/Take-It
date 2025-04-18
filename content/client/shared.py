@@ -4,7 +4,7 @@ from typing   import List
 from content.shared.info_enums import WorkMode, ClientState
 from content.shared.models     import ClientModel
 from content.shared.info       import Info
-from content.client.utils      import print_notify, NotifyType
+from content.shared.utils      import print_notify, NotifyType
 
 def incorrect_input(desc: str | None = None):
 	print_notify(f"Неправильный ввод{f": {desc}." if desc else '!'}", NotifyType.ERRO)
@@ -15,10 +15,10 @@ def print_send_file_command_info():
 	
 	print_notify(f"Чтобы отправить: {cyan('send')} <{cyan('receiver: name | address')}> <{cyan('path: file | dirr')}>")
 
-def is_client_suitable(client: ClientModel, info: Info) -> bool:
+def is_client_suitable(client: ClientModel, current_user_info: Info) -> bool:
 	return (
-		client.info.work_mode == WorkMode.RECEIVER and
-		client.info.user_name != info.user_name    and
+		client.info.user_name != current_user_info.user_name and
+		client.info.work_mode == WorkMode.RECEIVER           and
 		client.state          == ClientState.AWAIT
 	)
 

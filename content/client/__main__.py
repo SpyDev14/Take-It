@@ -1,4 +1,4 @@
-from websockets.exceptions     import ConnectionClosed, ConnectionClosedOK
+from websockets.exceptions     import ConnectionClosed, ConnectionClosedOK, ConnectionClosedError
 from websockets                import connect, ClientConnection
 from colorama                  import Fore, Style
 from requests                  import Response
@@ -8,14 +8,13 @@ import asyncio, requests, colorama, copy
 
 from content.client.command_handling import CommandHandler, help_command, send_command
 from content.client.shared           import incorrect_input, is_client_suitable, print_client
-from content.client.utils            import print_notify, NotifyType
 from content.client.utils            import play_symbol_animation
-from content.shared.dependencies     import DepencyContainer, Ref
+from content.shared.dependencies     import DependencyContainer, Ref, resolve_and_call
 from content.shared.info_enums       import WorkMode
 from content.shared.messages         import MessageHandler, MessageType, MessageModel, WebSocketInterface
 from content.shared.models           import ClientModel, ClientsModel
 from content.shared.config           import INVALID_CHARACTERS
-from content.shared.utils            import is_null_or_whitespace
+from content.shared.utils            import is_null_or_whitespace, print_notify, NotifyType
 from content.shared.info             import Info, is_valid_name
 import msg_handlers as handl
 
@@ -48,8 +47,11 @@ async def receiver_logic(websocket: WebSocketInterface):
 async def sender_logic(
 		websocket: WebSocketInterface,
 		server_ip: Ref[str],
-		this_dependency_container: DepencyContainer
+		current_user_info: Info,
+		this_dependency_container: DependencyContainer
 	):
+
+	COLUMN_WIDTH: int = 0
 	suitable_clients: Dict[str, ClientModel] = {}
 	
 	dependencies = copy.copy(this_dependency_container)
@@ -57,7 +59,6 @@ async def sender_logic(
 		suitable_clients = suitable_clients
 	)
 
-	COLUMN_WIDTH: int = 0
 	
 	print(f"\n{Style.BRIGHT}{"Доступные пользователи":^{COLUMN_WIDTH}}{Style.RESET_ALL}")
 	
@@ -71,15 +72,13 @@ async def sender_logic(
 		suitable_clients = {
 			name: client 
 			for name, client in clients.items()
-			if is_client_suitable(client)
+			if is_client_suitable(client, current_user_info)
 		}
 		
 		anim_task.cancel()
 		del anim_task
-
 	
 
-	command_handling_task: Task
 	command_handler = CommandHandler(
 		{
 			'send' : send_command,
@@ -88,37 +87,57 @@ async def sender_logic(
 		dependencies = this_dependency_container
 	)
 
+	message_handler = MessageHandler(
+		{
+			MessageType.CLIENT_CONNECTED        : handl.on_client_connected,
+			MessageType.CLIENT_DISCONNECTED     : handl.on_client_disconnected,
+			MessageType.CLIENT_STATUS_CHANGED   : handl.on_client_status_changed
+		},
+		websocket,
+		dependencies = this_dependency_container
+	)
+
 	# Отрисовка пользователей
 	if len(suitable_clients) > 0:
 		for client in suitable_clients.values():
 			print_client(client)
-
-		command_handling_task = asyncio.create_task(command_handler.handler())
-		await command_handling_task
 	else:
 		print_notify("Пользователей, подходящих для отправки сейчас нет", NotifyType.ERRO)
 
+		# Тут мне нужно запустить анимацию ожидания до появления первого клиента.
 		try:
 			async with TaskGroup() as tg:
-				anim_task: Task = tg.create_task(play_symbol_animation("Ожидание клиентов..."))
+				# anim_task: Task = tg.create_task(play_symbol_animation("Ожидание клиентов..."))
 
-				async def on_first_client_connected(msg: str):
-					await handl.on_client_connected(msg)
-					anim_task.cancel()
+				async def on_first_client_connected(this_dependency_container: DependencyContainer):
+					await handl.on_client_connected(
+						**this_dependency_container.resolve(handl.on_client_connected)
+					)
+
+					# anim_task.cancel()
+					# произойдёт выход из контекстного менеджера
+					# с завершением всех сопутствующих задач
+					# (считай raise)
 
 				temp_msg_handler = MessageHandler(
-					{ MessageType.CLIENT_CONNECTED : on_first_client_connected },websocket
+					{
+						MessageType.CLIENT_CONNECTED : on_first_client_connected
+					},
+					message_handler.websocket,
+					dependencies = message_handler.dependencies
 				)
+
 				tg.create_task(temp_msg_handler.handler())
 
-		except* CancelledError:
-			pass
+		except* CancelledError: pass
 
-		command_handling_task = asyncio.create_task(command_handler(ws))
-		await command_handling_task
-		
+	command_handling_task: Task = asyncio.create_task(command_handler.handler())
 	message_handling_task: Task = asyncio.create_task(message_handler.handler())
-	await message_handling_task
+		
+	asyncio.gather(
+		command_handling_task,
+		message_handling_task
+	)
 
 
 ## MAIN
@@ -180,12 +199,12 @@ async def main():
 
 			incorrect_input()
 
-		info = Info(user_name, work_mode)
+		current_user_info = Info(user_name, work_mode)
 		del user_name, work_mode
 
 		print(f"""
-name: {Fore.CYAN}{info.user_name     }{Fore.RESET}	
-mode: {Fore.CYAN}{info.work_mode.name}{Fore.RESET}
+name: {Fore.CYAN}{current_user_info.user_name     }{Fore.RESET}	
+mode: {Fore.CYAN}{current_user_info.work_mode.name}{Fore.RESET}
 		""")
 
 
@@ -195,19 +214,19 @@ mode: {Fore.CYAN}{info.work_mode.name}{Fore.RESET}
 			await anim_task
 			
 			print_notify("Установлено соединение с сервером")
-			await ws.send(f"{info.to_model().model_dump_json()}")
+			await ws.send(f"{current_user_info.to_model().model_dump_json()}")
 
-			dependencies = DepencyContainer(
+			dependencies = DependencyContainer(
 				websocket = WebSocketInterface(
 					receive = ws.recv,
 					send    = ws.send
 				),
 
-				server_ip = server_ip,
-				info      = info,
+				current_user_info = current_user_info,
+				server_ip         = server_ip,
 			)
 
-			logic: Callable[..., Awaitable] = client_logics[info.work_mode]
+			logic: Callable[..., Awaitable] = client_logics[current_user_info.work_mode]
 			await logic(**dependencies.resolve(logic))
 
 
@@ -224,7 +243,7 @@ mode: {Fore.CYAN}{info.work_mode.name}{Fore.RESET}
 	# ошибки, которые могут возникнуть после подключения
 	except ConnectionClosedOK as e:
 		print_notify(f"Соединение закрыто успешно с кодом {e.code}")
-	except ConnectionClosed as e:
+	except (ConnectionClosed, ConnectionClosedError) as e:
 		print_notify(f"Соединение разорванно с кодом {e.code}{(f", причина: '{e.reason}'" if e.reason else "")}", NotifyType.FATL)
 
 	# ошибка закрытия приложения через ctrl+c

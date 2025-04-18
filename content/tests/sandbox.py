@@ -1,14 +1,15 @@
 from typing import Callable, List, Dict, Awaitable
 from colorama import Fore, Style
-import asyncio
+import asyncio, copy
 
-from content.shared.info       import Info
-from content.shared.info_enums import WorkMode
-from content.shared.dependencies import DepencyContainer, Ref
+from content.shared.dependencies import DependencyContainer, Ref
+from content.shared.info_enums   import WorkMode
+from content.shared.utils        import print_notify, NotifyType
+from content.shared.info         import Info
 
 from content.client.command_handling import CommandHandler
-from content.client.utils            import print_notify, NotifyType
 
+"""
 async def echo_command(raw_user_input: Ref[str]):
 	user_input: str = raw_user_input.value
 
@@ -81,7 +82,7 @@ ch = CommandHandler(
 		for command in commands
 	},
 
-	dependencies = DepencyContainer(
+	dependencies = DependencyContainer(
 		user_info = Info('Чувак', WorkMode.RECEIVER),
 		funny_number = funny_number
 	)
@@ -89,3 +90,41 @@ ch = CommandHandler(
 
 
 asyncio.run(ch.handler())
+"""
+pivo_type: Ref[str] = Ref('svetloe')
+pivo_count: Ref[int] = Ref(10)
+deps: DependencyContainer = DependencyContainer(pivo_type = pivo_type)
+
+copy_deps = copy.copy(deps)
+copy_deps.add(pivo_count = pivo_count)
+
+print(f'''
+deps = {deps}
+copy = {copy_deps}
+
+count = {pivo_count}
+type  = {pivo_type}
+ 
+count in deps: {pivo_count in deps}
+count in copy: {pivo_count in copy_deps}
+
+type in deps: {pivo_type in deps}
+type in copy: {pivo_type in copy_deps}
+''')
+
+pivo_type.value = 'temnoe'
+pivo_count.value = 5
+
+print(f'''
+deps = {deps}
+copy = {copy_deps}
+
+count = {pivo_count}
+type  = {pivo_type}
+ 
+count in deps: {pivo_count in deps}
+count in copy: {pivo_count in copy_deps}
+
+type in deps: {pivo_type in deps}
+type in copy: {pivo_type in copy_deps}
+''')

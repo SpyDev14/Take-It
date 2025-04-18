@@ -1,4 +1,4 @@
-class MissingDepencyError(ValueError):
+class MissingDependencyError(ValueError):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 

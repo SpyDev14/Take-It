@@ -1,12 +1,64 @@
-from typing import Callable, Any, Dict, List, Set, Generic, Type, TypeVar
+from typing import Callable, Any, Dict, List, Set, Generic, Type, TypeVar, Self, Awaitable
 from enum   import Enum
-import inspect
+import inspect, copy
 
-from content.shared.exceptions import MissingDepencyError, ImmutableDependencyTypeError
+from content.shared.exceptions import MissingDependencyError, ImmutableDependencyTypeError
 
 _T = TypeVar('T')
 
 class Ref(Generic[_T]):
+	"""
+	Является классом-обёрткой для "создания ссылок" на неизменяемые типы (`int`, `str`, `bool`, `tuple`, ...). Нужен для работы с `DependencyContainer`.
+	Создать ссылку на неизменяемый объект с помощью него не получится, так как при создании такой объект
+	скопируется в аргументы.
+
+	## Осторожно!
+	Значение находится в поле `value`! Ref - объект с полем `value`! (Можно запутаться)
+	```
+	num = Ref(5)
+
+	num == 5 # False (хотя вообще исключение)
+	num.value == 5 # True
+    ```
+
+	### Пример создания:
+	```
+	num: int = 4
+	ref_num: Ref[int] = Ref(num) # Не сработает, конструктор получит копию num
+
+	print(ref_num.value is num) # False (так не работает)
+
+	good_num: Ref[int] = Ref(4)
+	ref_good_num = good_num
+
+	print(good_num.value is ref_good_num.value) # True
+	```
+
+	### Более подробный пример (с применением):
+	```
+		persons: List[str] = ['pers1', 'pers2'] # <- Изменяемый тип по умолчанию, т.е передав его в качестве аргумента будет передана ссылка на этот объект (далее ссылочный тип).
+		sample_num: int = 3 # <- Неизменяемый тип. При передачи в качестве аргумента получится новый объект (далее значимый тип).
+
+		deps = DependencyContainer(
+			persons = persons,
+			copy_of_sample_num = Ref(sample_num) # <- Мы создали копию sample_num, но copy_of_sample_num уже будет ссылочным объектом.
+		)
+		
+		print(sample_num is deps.get('copy_of_sample_num').value) # False (в контейнере копия)
+		print(persons    is deps.get('persons')) # True (в контейнере ссылка)
+
+		funny_number: Ref[int | None] = Ref(None) # Сразу создаём ссылочный объект
+
+		while not funny_number.value:
+			try:
+				funny_number.value = int(input('funny_number>>> '))
+			except: pass
+
+		deps.add(funny_number = funny_number) # funny_number - ссылочный объект, он нам подходит, можем добавить в DC
+		print(funny_number is deps.get('funny_number')) # True (в контейнере ссылка)
+	```
+	"""
+
 	__slots__ = ('value')
 
 	def __init__(self, value: _T):
@@ -17,7 +69,7 @@ class Ref(Generic[_T]):
 	
 del _T
 
-class DepencyContainer():
+class DependencyContainer():
 	'''
 	Предстовляет собой словарь ссылок на объекты с дополнительными методами.
 	Нужен для удобного управления зависимостями обработчиков.
@@ -32,6 +84,20 @@ class DepencyContainer():
 	Используйте `Ref()` обёртку для подобных типов.
 	Это связанно с тем, что на неизменяемые типы не может быть ссылок,
 	а DependencyContainer - это именованный список ссылок.
+
+	#### Пример использования:
+	```
+		# `Ref` - обёртка для создания ссылки
+		def funny_func(bottles_count: Ref[int], persons: List[str])
+			pass
+		
+		dependencies = DependencyContainer(
+			bottles_count = Ref(12),
+			persons = ['Oleg', 'Pavel', 'Nekitos']
+		)
+
+		funny_func(**dependencies.resolve(funny_func))
+	```
 
 	:raise ImmutableDependencyTypeError: В конструктор был передан неизменяемый тип, который несовместим с DependencyContainer.
 	'''
@@ -73,13 +139,26 @@ class DepencyContainer():
 		dependencies['this_dependency_container'] = self
 		self._dependencies: Dict[str, Any] = dependencies
 
+		assert self.get('this_dependency_container') is self
+
 	def __len__(self):
 		return len(self._dependencies)
 	
 	def __contains__(self, depency):
-		return depency in self._dependencies
+		return depency in self._dependencies.values()
 	
+	def __copy__(self) -> Self:
+		new_deps = DependencyContainer(
+			**self._dependencies
+		)
+		assert new_deps.get('this_dependency_container') is new_deps
+
+		return new_deps
 	
+	def __str__(self) -> str:
+		return str(self._dependencies)
+	
+
 	def add(self, **new_dependencies):
 		'''
 		Добавляет зависимости в контейнер. В качестве значения необходимо указывать ссылку, а не значение.
@@ -126,20 +205,88 @@ class DepencyContainer():
 		return self._dependencies.get(name.strip())
 	
 
-	def resolve(self, customer: Callable):
+	def resolve(
+			self,
+			customer: Callable,
+			# temp_dependencies: Dict[str, Any] | None = None,
+			# *,
+			# overrides: Dict[str, str] | None = None
+		):
+		"""
+		Возвращает словарь с зависимостями, необходимыми для выполнения функции, если таковые есть.
+		Если каких-то зависимостей нет - вызовет ошибку, в которой укажет каких именно зависимостей
+		не хватает и какие есть на текущий момент.
+
+		#### Пример:
+		```
+			# При чём здесь `Ref` - см. в docstring DependencyContainer
+			def funny_func(bottles_count: Ref[int], persons: List[str])
+				pass
+			
+			dependencies = DependencyContainer(
+				bottles_count = Ref(12),
+				persons = ['Oleg', 'Pavel', 'Nekitos']
+			)
+
+			funny_func(**dependencies.resolve(funny_func))
+		```
+
+		:param customer: Функция "заказчик".
+
+		:raise MissingDependencyError: Одной или нескольких зависимостей в контейнере не хватает.
+			В ошибке пропишет каких не хватает и какие есть.
+		"""
+
+		dependencies: DependencyContainer = copy.copy(self._dependencies)
+
+		# if temp_dependencies:
+		# 	dependencies.add(**temp_dependencies)
+
 		required_dependencies: Dict[str, Any] = dict()
 		missing_dependencies:  List[str]      = list()
 
 		for required_depency in inspect.signature(customer).parameters:
-			if required_depency not in self._dependencies:
+			if required_depency not in dependencies:
 				missing_dependencies.append(required_depency)
 				continue
 				
-			required_dependencies[required_depency] = self._dependencies[required_depency]
+			required_dependencies[required_depency] = dependencies[required_depency]
 			
 		if missing_dependencies:
-			raise MissingDepencyError(f"Necessary dependencies are missing: {', '.join(missing_dependencies)}.\n" +
-			f"Available dependencies:\n{'\n'.join(self._dependencies)}"
+			raise MissingDependencyError(
+				f"Necessary dependencies are missing: {', '.join(missing_dependencies)}.\n" +
+				f"Available dependencies: {', '.join(dependencies)}"
 			)
 
 		return required_dependencies
+	
+async def resolve_and_call(
+		func: Callable[..., Any] | Callable[..., Awaitable[Any]],
+		dependencies: DependencyContainer
+	):
+
+	"""
+	Вызывает функцию и решает её зависимости. Работает как с синхронными, так и с асинхронными функциями.
+
+	#### Пример:
+	```
+	# Sync
+	result = resolve_and_call(sync_func, dependencies)
+
+	# Async
+	result = await resolve_and_call(async_func, dependencies)
+	```
+
+	:param func: Функция (синхронная / асинхронная)
+	:param depdendencies: Контейнер с зависимостями.
+
+	:return: Результат выполнения функции или корутину с результатом (или как оно там).
+	"""
+
+	required_dependencies: Dict[str, Any] = dependencies.resolve(func)
+
+	if inspect.iscoroutinefunction(func):
+		return await func(**required_dependencies)
+	
+	else:
+		return func(**required_dependencies)

@@ -1,30 +1,27 @@
 from aioconsole import ainput
 from typing     import Dict, Set, List, Callable, Awaitable, Any
 from asyncio    import Task, CancelledError
-import asyncio, shlex
+import asyncio, shlex, copy
 
-from content.shared.dependencies import DepencyContainer, Ref
-from content.shared.utils        import is_null_or_whitespace
+from content.shared.dependencies import DependencyContainer, Ref
+from content.shared.utils        import is_null_or_whitespace, print_notify, NotifyType
 from content.client.shared       import print_send_file_command_info, incorrect_input
-from content.client.utils        import print_notify, NotifyType 
 
 
 ## Commands
 async def send_command(command_args:  List[str]):
-	args: List[str] = command_args
-	
-	if len(args) < 2:
+	if len(command_args) < 2:
 		raise Exception('Необходимо указать <имя\\адрес клиента>, а также путь до <файла\\папки>')
 	
-	receiver = args[0]
-	path     = args[1]
+	receiver = command_args[0]
+	path     = command_args[1]
 	
 	
-	if not receiver or not path:
+	# На будущее
+	if False:
 		raise Exception('Аргументы указанны неправильно')
-	
-	print_notify("Method send_file() not implemented", NotifyType.DEBG)
-	raise NotImplementedError()
+
+	print_notify("Send command not implemented :(", NotifyType.DEBG)
 
 
 async def help_command():
@@ -49,7 +46,7 @@ class CommandHandler:
 			self,
 			command_handlers: Dict[str, Callable[..., Awaitable[None]]],
 			*,
-			dependencies:      DepencyContainer,
+			dependencies:      DependencyContainer,
 			on_unknow_command: Callable = incorrect_input,
 			command_prefix:    str      = '>>> ',
 			on_error_func:     Callable[[Exception], Awaitable[None]] | None = None
@@ -66,7 +63,7 @@ class CommandHandler:
 
 		self._command_handlers: Dict[str, Callable[..., Awaitable[None]]] = command_handlers
 
-		self._dependencies:      DepencyContainer                       = dependencies
+		self._dependencies:      DependencyContainer                    = dependencies
 		self._on_error_func:     Callable[[Exception], Awaitable[None]] = on_error_func
 		self._on_unknow_command: Callable                               = on_unknow_command
 		self._command_prefix:    str                                    = command_prefix
@@ -77,14 +74,12 @@ class CommandHandler:
 		command_name:   Ref[str | None] = Ref(None)
 		command_args:  List[str]        = []
 
-		command_handling: Task | None = None
-		error_handling:   Task | None = None
 
-		dependencies: DepencyContainer = self._dependencies
+		dependencies: DependencyContainer = self._dependencies
 		dependencies.add(
 			raw_user_input = raw_user_input,
 			command_name   = command_name,
-			command_args   = command_args
+			command_args   = command_args,
 		)
 
 		assert dependencies is self._dependencies
@@ -92,15 +87,7 @@ class CommandHandler:
 		assert dependencies.get('command_name')   is command_name
 		assert dependencies.get('command_args')   is command_args
 
-		def on_error(ex: Exception):
-			'''Нужно вызывать при ошибке, если её нужно как-то обработать'''
-			nonlocal error_handling
 
-			command_handling.cancel()
-
-			if self._on_error_func:
-				error_handling = asyncio.create_task(self._on_error_func(ex))
-	
 		try:
 			while True:
 				raw_user_input.value = await ainput(self._command_prefix)
@@ -112,31 +99,18 @@ class CommandHandler:
 				command_args = prepared_input
 
 
-				if command_name not in self._command_handlers:
+				if command_name.value not in self._command_handlers:
 					self._on_unknow_command()
 					continue
 
-				command_func: Callable = self._command_handlers[command_name]
-				command_handling = asyncio.create_task(command_func(**dependencies.resolve(command_func)))
+				command_func: Callable = self._command_handlers[command_name.value]
 				
-				try: await command_handling
+				try: await command_func(**dependencies.resolve(command_func))
 				except Exception as ex:
-					on_error(ex)
-
-					await error_handling
+					await self._on_error_func(ex)
 				
 		except CancelledError:
-			if not command_handling:
-				return
-			
-			elif not command_handling.cancelled():
-				try:
-					await command_handling
-				except Exception as ex:
-					on_error(ex)
-
-			if error_handling:
-				await error_handling
+			pass
 
 		except (EOFError, KeyboardInterrupt):
 			pass

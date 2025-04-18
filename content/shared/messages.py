@@ -4,10 +4,10 @@ from typing   import Dict, Callable, Awaitable, Any, Literal, Union
 from enum     import Enum
 import asyncio
 
-from content.shared.dependencies import DepencyContainer, Ref
+from content.shared.dependencies import DependencyContainer, Ref
 from content.shared.info_enums   import ClientState
 from content.shared.models       import ClientModel, FileInfoModel
-from content.client.utils        import print_notify, NotifyType # Говно решение???
+from content.shared.utils        import print_notify, NotifyType
 
 
 
@@ -22,6 +22,7 @@ class WebSocketInterface():
 		self._receive: Callable[[],     Awaitable[bytes | str]] = receive
 		self._send:    Callable[[bytes | str], Awaitable[None]] = send
 
+	# публичные методы для удобного и понятного взаимодействия
 	async def receive(self) -> bytes | str:
 		return await self._receive()
 	
@@ -43,26 +44,34 @@ class MessageHandler():
 	"""
 	#### Зависимости по умолчанию:
 		`websocket: WebSocketInterface` - вебсокет. 
-		`received_data: bytes` - полученная по websocket строка текста.
+		`received_data: str | bytes` - полученная по websocket строка текста либо очередь байтов.
 
 	:param message_handlers: Обработчики вебсокет сообщений, в формате вызываемых объектов с параметрами.
-	:param websocket:        WebSocketInterface для работы этого обработчика. также передаётся в контейнер зависимостей.
-	:param dependencies:     Зависимости для обработчиков. Добавляемые по умолчанию объекты описаны выше.
-	:param on_error_func:    Асинхронный вызываемый объект, вызываемый при необработанном исключении в коде обработчика.
-	:param timeout:          Максимальное время выполнения обработки сообщения. Если необходимо отключить - укажите 0.
+
+	:param websocket: WebSocketInterface для работы этого обработчика.
+		Также передаётся в контейнер зависимостей.
+
+	:param dependencies: Зависимости для обработчиков. Добавляемые по умолчанию объекты описаны выше.
+
+	:param on_error_func: Асинхронный вызываемый объект, вызываемый при необработанномисключении
+		в коде обработчика.	Если ничего не указанно - используется своя асинхронная функция,
+		на основе `print_notify` с режимом `ERRO`.
+
+	:param timeout: Максимальное время выполнения обработки сообщения. Если необходимо отключить - укажите 0.
 	"""
 	
 	def __init__(
 			self,
-			message_handlers: Dict[MessageType, Callable[[str], None]],
+			message_handlers: Dict[MessageType, Callable[..., None]],
 			websocket:        WebSocketInterface,
 			*,
-			dependencies:  DepencyContainer | None = None,
-			timeout:       float            | None = 15,
+			dependencies:  DependencyContainer = DependencyContainer(),
+			timeout:       float                                  | None = 15,
 			on_error_func: Callable[[Exception], Awaitable[None]] | None = None
 		):
 
-		dependencies.add(websocket = websocket)
+		if websocket not in dependencies:
+			dependencies.add(websocket = websocket)
 		assert dependencies.get('websocket') is websocket
 
 		if not on_error_func:
@@ -77,7 +86,7 @@ class MessageHandler():
 		self._message_handlers: Dict[MessageType, Callable[..., Awaitable]] = message_handlers
 		self._websocket:        WebSocketInterface                          = websocket
 		
-		self._dependencies:     DepencyContainer                            = dependencies
+		self._dependencies:     DependencyContainer                         = dependencies
 		self._on_error_func:    Callable[[Exception], Awaitable]            = on_error_func
 		self._timeout:          float | None                                = timeout
 
@@ -89,7 +98,7 @@ class MessageHandler():
 		message_handling: Task | None = None
 		error_handling:   Task | None = None
 
-		dependencies: DepencyContainer = self._dependencies
+		dependencies: DependencyContainer = self._dependencies
 		dependencies.add(received_data = received_data)
 
 		assert dependencies.get('received_data') is received_data
@@ -149,7 +158,7 @@ class MessageHandler():
 		return self._websocket
 	
 	@property
-	def dependencies(self) -> DepencyContainer:
+	def dependencies(self) -> DependencyContainer:
 		return self._dependencies
 
 
@@ -173,6 +182,7 @@ class ClientStatusChangedMessage(MessageModel):
 	new_state: ClientState
 	old_state: ClientState
 
+"""
 class FileSendingStartMessage(MessageModel):
 	type: Literal[MessageType.FILE_FORWARDING_REQUEST] = Field(default=MessageType.FILE_FORWARDING_REQUEST, frozen=True)
 
@@ -185,3 +195,4 @@ class FileSendingAcceptMessage(MessageModel):
 	type: Literal[MessageType.FILE_FORWARDING_ACCEPT] = Field(default=MessageType.FILE_FORWARDING_ACCEPT, frozen=True)
 
 	chunk_size: int
+"""
