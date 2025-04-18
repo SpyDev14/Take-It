@@ -1,9 +1,9 @@
 from enum     import Enum
-from typing   import Tuple, Set
+from typing   import Tuple
 from colorama import Fore
-import asyncio, time
+import asyncio
 
-from shared.utils import is_null_or_whitespace
+from content.shared.utils import is_null_or_whitespace
 
 class NotifyType(Enum):
 	INFO: str = Fore.CYAN
@@ -33,8 +33,8 @@ class PreparedAnimations(Enum):
 	FILLING: Tuple[str] = ('▁▂▃▅▆█')
 
 # MARK: мб, потом сделаю класс "AnimationSettings" и enum "PreparedAnimations" (с другим названием)
-# MARK: Может стоит добавить bool "очищать строку после завершения"?
-async def play_simbol_animation(
+# MARK: Может, стоит добавить bool "очищать строку после завершения"?
+async def play_symbol_animation(
 		text: str | None = None,
 		*,
 		anim_shots: Tuple[str] | PreparedAnimations = PreparedAnimations.LINE,
@@ -47,7 +47,7 @@ async def play_simbol_animation(
 	"""
 	Должна запускаться в асинхронной task:
 	```python
-	task = asyncio.create_task(play_onechar_animation())
+	task = asyncio.create_task(play_symbol_animation())
 	```
 	
 	Для корректного завершения работы, должна завершаться следующим образом:
@@ -60,7 +60,7 @@ async def play_simbol_animation(
 	`task.cancel()`, а ожидание завершения задачи произойдёт автоматически.
 
 	:param text: Текст перед анимацией: `"Поиск..." /` (отступ между текстом и анимацией определяется `indent`)
-	:param anim_shots: Кадры анимации в ввиде Tuple[str], или из заранее заготовленных.
+	:param anim_shots: Кадры анимации в виде Tuple[str], или из заранее заготовленных.
 	:param anim_speed: Сколько раз в секунду проигрывать анимацию? (Зависит от количества кадров)
 	:param close_anim_with: Какой символ будет выведен, после окончания анимации?
 	(Если нужно, чтобы в конце был символ новой строки, например)
@@ -95,6 +95,8 @@ async def play_simbol_animation(
 		# Очистка строки
 		print(f"\r{' '*(len(text)+max(map(len, anim_shots)))}\r", end=close_anim_with, flush=True)
 
+
+
 ##MARK: START
 if __name__ == '__main__':
 	msg: str = "lazy dog"
@@ -105,7 +107,7 @@ if __name__ == '__main__':
 
 	async def func():
 		for anim in PreparedAnimations:
-			anim_task = asyncio.create_task(play_simbol_animation(f"{anim.name}:", anim_shots=anim))
+			anim_task = asyncio.create_task(play_symbol_animation(f"{anim.name}:", anim_shots=anim))
 			await asyncio.sleep(5)
 			anim_task.cancel()
 			await anim_task
