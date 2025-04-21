@@ -6,11 +6,11 @@ import asyncio
 from content.shared.utils import is_null_or_whitespace, print_notify, NotifyType
 
 class PreparedAnimations(Enum):
-	LINE:    Tuple[str] = ('|', '/', '-', '\\')
-	POINTS:  Tuple[str] = ('.  ', '.. ', '...')
-	CIRCLE:  Tuple[str] = ('◜','◝','◞','◟')
-	BLOCK:   Tuple[str] = ('▌','▀','▐','▄')
-	FILLING: Tuple[str] = ('▁▂▃▅▆█')
+	LINE:    Tuple[str] | str = ('|', '/', '-', '\\')
+	POINTS:  Tuple[str] | str = ('.  ', '.. ', '...')
+	CIRCLE:  Tuple[str] | str = ('◜','◝','◞','◟')
+	BLOCK:   Tuple[str] | str = ('▌','▀','▐','▄')
+	FILLING: Tuple[str] | str = '▁▂▃▅▆█'
 
 # MARK: мб, потом сделаю класс "AnimationSettings" и enum "PreparedAnimations" (с другим названием)
 # MARK: Может, стоит добавить bool "очищать строку после завершения"?
@@ -48,18 +48,22 @@ async def play_symbol_animation(
 	:param indent: Символ отступа между текстом и анимацией
 	:param force_shot_time: Форсирует время одного кадра (проигнорирует `anim_speed`)
 	"""
-	if isinstance(anim_shots, PreparedAnimations):
-		anim_shots = anim_shots.value 
-
-	if len(anim_shots) < 2:
-		if len(anim_shots) < 1:
-			print_notify("Anim err: to many shots", NotifyType.ERRO)
-			return
-
-		anim_shots = tuple(anim_shots[0])
+	try:
+		if isinstance(anim_shots, PreparedAnimations):
+			anim_shots = anim_shots.value
+			
+		if isinstance(anim_shots, str):
+			anim_shots = tuple(anim_shots)
+			
 	
-	if anim_speed <= 0:
-		print_notify("Anim err: speed can't be <= 0")
+		if len(anim_shots) < 2:
+			raise ValueError("to many shots")
+		
+		if anim_speed <= 0:
+			raise ValueError("animation speed must be > 0")
+		
+	except ValueError as e:
+		print_notify(f"Anim error: {e}", NotifyType.ERRO)
 		return
 
 	shot_time: float = (1 / anim_speed) / len(anim_shots) if not force_shot_time else force_shot_time
@@ -68,12 +72,12 @@ async def play_symbol_animation(
 	try:
 		while True:
 			for shot in anim_shots:
-				print(f"\r{text}{shot}", end='', flush=True)
+				print(f"\r{text}{shot}", end = '', flush = True)
 				await asyncio.sleep(shot_time)
 
 	except asyncio.CancelledError:
 		# Очистка строки
-		print(f"\r{' '*(len(text)+max(map(len, anim_shots)))}\r", end=close_anim_with, flush=True)
+		print(f"\r{' '*(len(text)+max(map(len, anim_shots)))}\r", end = close_anim_with, flush = True)
 
 
 

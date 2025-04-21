@@ -1,11 +1,12 @@
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 from fastapi.responses  import JSONResponse
 from fastapi            import FastAPI
+from pydantic           import ValidationError
 import asyncio
 
 from content.server.exceptions import ClientSideError
 from content.server.client     import Client, ClientManager
-from content.server.config     import FILE_CHUNK_SIZE
+# from content.server.config     import FILE_CHUNK_SIZE
 from content.shared.messages   import MessageType, MessageHandler, WebSocketInterface
 from content.shared.models     import InfoModel, ClientsModel
 from content.shared.utils      import print_notify, NotifyType
@@ -30,9 +31,8 @@ async def websocket_endpoint(ws: WebSocket):
 		info_model: InfoModel | None = None
 		try:
 			info_model = InfoModel.model_validate_json(data)
-		except:
+		except ValidationError:
 			await manager.disconnect(client, 1002, MSG.RECEIVED_NOT_INFOMODEL)
-
 
 		await manager.accept(client, Info.from_model(info_model))
 
@@ -41,17 +41,16 @@ async def websocket_endpoint(ws: WebSocket):
 
 		message_handler = MessageHandler(
 			{
-				MessageType.FILE_FORWARDING_REQUEST : handl.plug
+				MessageType.FILE_FORWARDING_REQUEST : handl.on_file_forwarding_request
 			},
 			
 			WebSocketInterface(
-				receive = ws.receive,
-				send    = ws.send
+				receive = ws.receive_bytes,
+				send    = ws.send_bytes
 			)
 		)
 
 		ws_message_handling = asyncio.create_task(message_handler.handler())
-		raise Exception('копатыча мобилизировали на сво!!!')
 		await ws_message_handling
 
 		
@@ -60,16 +59,16 @@ async def websocket_endpoint(ws: WebSocket):
 
 	except ClientSideError as ex:
 		await manager.disconnect(client, 1002, ex.description)
-		print_notify(ex, NotifyType.ERRO)
+		print_notify(ex.description, NotifyType.ERRO)
 
 	except Exception as ex:
-		await manager.disconnect(client, 1011, ex.args if ex.args else None)
+		await manager.disconnect(client, 1011, str(ex) if ex.args else None)
 		print_notify(ex, NotifyType.ERRO)
 
 @app.get('/clients/')
 async def get_clients():
 	return JSONResponse(
 		ClientsModel(
-			clients = { name: client.to_model() for name, client in manager.clients.items() }
+			clients = { name: client.to_model() for name, client in manager._clients.items() }
 		).model_dump(mode='json')
 	)

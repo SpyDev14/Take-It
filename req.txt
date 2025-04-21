@@ -1,7 +1,10 @@
 fastapi[all]
+pydantic
 requests
 websockets
 colorama
 pytest
 aioconsole
 setuptools
+content
+starlette

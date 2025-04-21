@@ -7,7 +7,7 @@ from content.shared.models     import InfoModel
 def is_valid_name(name: str) -> bool:
 	return not any(char in INVALID_CHARACTERS for char in name)
 
-class Info():
+class Info:
 	def __init__(self, user_name: str, work_mode: WorkMode):
 		self.user_name: str = user_name
 		self.work_mode: WorkMode = work_mode

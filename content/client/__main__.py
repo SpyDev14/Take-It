@@ -32,7 +32,7 @@ async def receiver_logic(websocket: WebSocketInterface):
 
 			msg_type = MessageModel.model_validate_json(data).type
 
-			if (msg_type.name == 'dd'):
+			if msg_type.name == 'dd':
 				print(data)
 		# anim_task.cancel()
 		# await anim_task
@@ -134,7 +134,7 @@ async def sender_logic(
 	command_handling_task: Task = asyncio.create_task(command_handler.handler())
 	message_handling_task: Task = asyncio.create_task(message_handler.handler())
 		
-	asyncio.gather(
+	await asyncio.gather(
 		command_handling_task,
 		message_handling_task
 	)
@@ -146,7 +146,7 @@ async def main():
 	work_mode: WorkMode | None = None
 	user_name: str      | None = None
 
-	client_logics: Dict[WorkMode, Callable[[ClientConnection], None]] = {
+	client_logics: Dict[WorkMode, Callable[..., Awaitable[None]]] = {
 		WorkMode.RECEIVER : receiver_logic,
 		WorkMode.SENDER   : sender_logic
 	}
@@ -164,7 +164,7 @@ async def main():
 	try:
 		print(f"\nДобро пожаловать в {Fore.CYAN}Take It{Fore.RESET}!\n")
 
-		while user_name == None:
+		while not user_name:
 			answer = input("Укажите своё имя: ")
 
 			if is_null_or_whitespace(answer):
@@ -186,7 +186,8 @@ async def main():
 {Fore.CYAN}0{Fore.RESET} - {Fore.CYAN}R{Fore.RESET}ECEIVE
 {Fore.CYAN}1{Fore.RESET} - {Fore.CYAN}S{Fore.RESET}END
 		""".strip())
-		while work_mode == None:
+		
+		while not work_mode:
 			answer = input(f">>> ").strip().lower()
 
 			if answer in {'0', 'receive', 'r'}:

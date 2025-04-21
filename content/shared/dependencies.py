@@ -1,10 +1,9 @@
 from typing import Callable, Any, Dict, List, Set, Generic, Type, TypeVar, Self, Awaitable
-from enum   import Enum
 import inspect, copy
 
-from content.shared.exceptions import MissingDependencyError, ImmutableDependencyTypeError
+from content.shared.exceptions import MissingDependencyError, DependencyCannotBeImmutableType
 
-_T = TypeVar('T')
+_T = TypeVar('_T')
 
 class Ref(Generic[_T]):
 	"""
@@ -17,7 +16,7 @@ class Ref(Generic[_T]):
 	```
 	num = Ref(5)
 
-	num == 5 # False (хотя вообще исключение)
+	num == 5 # False
 	num.value == 5 # True
     ```
 
@@ -59,7 +58,7 @@ class Ref(Generic[_T]):
 	```
 	"""
 
-	__slots__ = ('value')
+	__slots__ = 'value'
 
 	def __init__(self, value: _T):
 		self.value: _T = value
@@ -69,13 +68,13 @@ class Ref(Generic[_T]):
 	
 del _T
 
-class DependencyContainer():
-	'''
-	Предстовляет собой словарь ссылок на объекты с дополнительными методами.
+class DependencyContainer:
+	"""
+	Представляет собой словарь ссылок на объекты с дополнительными методами.
 	Нужен для удобного управления зависимостями обработчиков.
 
 	#### Зависимости по умолчанию:
-		`this_dependency_container: DepencyContainer` - объект этого контейнера зависимостей.
+		`this_dependency_container: DependencyContainer` - объект этого контейнера зависимостей.
 
 	### Неизменяемые типы не поддерживаются:
 	```
@@ -100,7 +99,7 @@ class DependencyContainer():
 	```
 
 	:raise ImmutableDependencyTypeError: В конструктор был передан неизменяемый тип, который несовместим с DependencyContainer.
-	'''
+	"""
 
 	# Неизменяемые типы, т.е те, при присваивании которых получается копия, а не ссылка
 	# x = 10; y = x;    y is x   == False <- копирование
@@ -118,18 +117,20 @@ class DependencyContainer():
 		None
 	)
 
-	def __check_dependency_object_type_mutable(cls, name, dependency):
-		'''
+	def __check_dependency_object_type_mutable(self, name, dependency):
+		"""
 		Проверяет поддерживаемость типа объекта. Выкидывает исключение, если тип неизменяемый.
 
 		:param name:       Имя зависимости
 		:param dependency: Объект зависимости для проверки.
 
-		:raise ImmutableDependencyTypeError: Тип неизменяем => неподдерживается.
-		'''
-		if type(dependency) in cls._IMMUTABLE_TYPES:
-			raise ImmutableDependencyTypeError(
-				f"Object '{name}' is immutable, so it can't be here. Use Ref() class for make his mutable. Immutable (unsupported) types: {', '.join(cls._IMMUTABLE_TYPES)}"
+		:raise ImmutableDependencyTypeError: Тип неизменяем => не поддерживается.
+		"""
+		if type(dependency) in self._IMMUTABLE_TYPES:
+			raise DependencyCannotBeImmutableType(
+				f"Object '{name}' is immutable, so it can't be here. \
+Use Ref() class for make his mutable. \
+Immutable (unsupported) types: {', '.join({str(immutable_type) for immutable_type in self._IMMUTABLE_TYPES})}"
 			)
 
 	def __init__(self, **dependencies):
@@ -144,8 +145,8 @@ class DependencyContainer():
 	def __len__(self):
 		return len(self._dependencies)
 	
-	def __contains__(self, depency):
-		return depency in self._dependencies.values()
+	def __contains__(self, dependency):
+		return dependency in self._dependencies.values()
 	
 	def __copy__(self) -> Self:
 		new_deps = DependencyContainer(
@@ -160,11 +161,11 @@ class DependencyContainer():
 	
 
 	def add(self, **new_dependencies):
-		'''
+		"""
 		Добавляет зависимости в контейнер. В качестве значения необходимо указывать ссылку, а не значение.
 
 		:raise KeyError: Одна или несколько зависимостей с таким именем уже есть
-		'''
+		"""
 
 		conflict_dependencies:  List[str] = []
 		dependencies_to_adding: Dict[str, Any] = {}
@@ -180,18 +181,18 @@ class DependencyContainer():
 		
 		if conflict_dependencies:
 			raise KeyError(
-				f"Depency '{conflict_dependencies[0]}' is already there" if len(conflict_dependencies) == 1
+				f"Dependency '{conflict_dependencies[0]}' is already there" if len(conflict_dependencies) == 1
 				else f"The dependencies {', '.join(conflict_dependencies)} already exist."
 			)
 
 		self._dependencies.update(dependencies_to_adding)
 
 	def remove(self, name: str):
-		'''
+		"""
 		Удаляет зависимость
 
 		:raise KeyError: Зависимости не существует
-		'''
+		"""
 
 		if name not in self._dependencies:
 			raise KeyError(f"Dependency '{name}' does not exist")
@@ -200,7 +201,7 @@ class DependencyContainer():
 
 
 	def get(self, name: str) -> Any | None:
-		'''Возвращает зависимость по имени. Вернёт `None`, если такой зависимости нет.'''
+		"""Возвращает зависимость по имени. Вернёт `None`, если такой зависимости нет."""
 
 		return self._dependencies.get(name.strip())
 	
@@ -208,9 +209,7 @@ class DependencyContainer():
 	def resolve(
 			self,
 			customer: Callable,
-			# temp_dependencies: Dict[str, Any] | None = None,
-			# *,
-			# overrides: Dict[str, str] | None = None
+			# temp_dependencies: Dict[str, Any] | None = None
 		):
 		"""
 		Возвращает словарь с зависимостями, необходимыми для выполнения функции, если таковые есть.
@@ -237,7 +236,7 @@ class DependencyContainer():
 			В ошибке пропишет каких не хватает и какие есть.
 		"""
 
-		dependencies: DependencyContainer = copy.copy(self._dependencies)
+		dependencies: DependencyContainer = copy.copy(self)
 
 		# if temp_dependencies:
 		# 	dependencies.add(**temp_dependencies)
@@ -245,17 +244,17 @@ class DependencyContainer():
 		required_dependencies: Dict[str, Any] = dict()
 		missing_dependencies:  List[str]      = list()
 
-		for required_depency in inspect.signature(customer).parameters:
-			if required_depency not in dependencies:
-				missing_dependencies.append(required_depency)
+		for required_dependency in inspect.signature(customer).parameters:
+			if required_dependency not in dependencies:
+				missing_dependencies.append(required_dependency)
 				continue
 				
-			required_dependencies[required_depency] = dependencies[required_depency]
+			required_dependencies[required_dependency] = dependencies.get(required_dependency)
 			
 		if missing_dependencies:
 			raise MissingDependencyError(
 				f"Necessary dependencies are missing: {', '.join(missing_dependencies)}.\n" +
-				f"Available dependencies: {', '.join(dependencies)}"
+				f"Available dependencies: {', '.join(dependencies._dependencies)}"
 			)
 
 		return required_dependencies
@@ -278,7 +277,7 @@ async def resolve_and_call(
 	```
 
 	:param func: Функция (синхронная / асинхронная)
-	:param depdendencies: Контейнер с зависимостями.
+	:param dependencies: Контейнер с зависимостями.
 
 	:return: Результат выполнения функции или корутину с результатом (или как оно там).
 	"""

@@ -1,27 +1,56 @@
 from aioconsole import ainput
 from typing     import Dict, Set, List, Callable, Awaitable, Any
 from asyncio    import Task, CancelledError
+from pathlib    import Path
 import asyncio, shlex, copy
 
 from content.shared.dependencies import DependencyContainer, Ref
+from content.shared.messages     import WebSocketInterface
+from content.shared.models       import ClientModel, AddressModel
 from content.shared.utils        import is_null_or_whitespace, print_notify, NotifyType
 from content.client.shared       import print_send_file_command_info, incorrect_input
 
 
 ## Commands
-async def send_command(command_args:  List[str]):
+async def send_command(
+		command_args: List[str],
+		suitable_clients: Dict[str, ClientModel],
+		websocket: WebSocketInterface
+	):
 	if len(command_args) < 2:
-		raise Exception('Необходимо указать <имя\\адрес клиента>, а также путь до <файла\\папки>')
+		raise Exception('Необходимо указать <имя\\адрес клиента> и <путь до файла\\папки>')
 	
-	receiver = command_args[0]
-	path     = command_args[1]
+	receiver: ClientModel | None = None
+	path:     Path        | None = None
+	
+	try:
+		receiver = suitable_clients.get(command_args[0])
+		
+		if not receiver:
+			split_result: List[str] = command_args[0].split(':')
+			
+			address: AddressModel = AddressModel(
+				host = split_result[0],
+				port = int(split_result[1]),
+			)
+			
+			# Вызовет исключение StopIteration, если ничего не найдёт
+			receiver = next(
+				client for client in suitable_clients.values()
+				if client.address == address
+			)
+	except:
+		raise Exception(f'Получатель указан неправильно')
+	
+	path = Path(command_args[1])
+	if not path.exists():
+		raise Exception('Путь указан неправильно')
+	
+	assert receiver and path
 	
 	
-	# На будущее
-	if False:
-		raise Exception('Аргументы указанны неправильно')
-
-	print_notify("Send command not implemented :(", NotifyType.DEBG)
+	files_for_sending: None  # Нужна модель
+	await websocket.send('') # Отправка запроса на пересылку файла
 
 
 async def help_command():
@@ -36,20 +65,20 @@ class CommandHandler:
 			`command_name: str`       - название команды.
 			`command_args: List[str]` - аргументы в формате листа.
 
-		:param command_handlers:  Обработчики команд, в формате вызываемых объектов с параметрами.
-		:param dependencies:      Зависимости для обработчиков. Добавляемые по умолчанию объекты описаны выше.
-		:param on_error_func:     Асинхронный вызываемый объект, вызываемый при необработанном исключении в коде обработчика.
-		:param on_unknow_command: Синхронный вызываемый объект, вызываемый при попытке выполнить несуществующую команду.
-		:param command_prefix:    Прификс командной строки. По умолчанию = `'>>> '`
+		:param command_handlers:   Обработчики команд, в формате вызываемых объектов с параметрами.
+		:param dependencies:       Зависимости для обработчиков. Добавляемые по умолчанию объекты описаны выше.
+		:param on_error_func:      Асинхронный вызываемый объект, вызываемый при необработанном исключении в коде обработчика.
+		:param on_unknown_command: Синхронный вызываемый объект, вызываемый при попытке выполнить несуществующую команду.
+		:param command_prefix:     Прификс командной строки. По умолчанию = `'>>> '`
 	"""
 	def __init__(
 			self,
 			command_handlers: Dict[str, Callable[..., Awaitable[None]]],
 			*,
-			dependencies:      DependencyContainer,
-			on_unknow_command: Callable = incorrect_input,
-			command_prefix:    str      = '>>> ',
-			on_error_func:     Callable[[Exception], Awaitable[None]] | None = None
+			dependencies:       DependencyContainer,
+			on_unknown_command: Callable = incorrect_input,
+			command_prefix:     str      = '>>> ',
+			on_error_func:      Callable[[Exception], Awaitable[None]] | None = None
 		):
 
 		if not on_error_func:
@@ -63,10 +92,10 @@ class CommandHandler:
 
 		self._command_handlers: Dict[str, Callable[..., Awaitable[None]]] = command_handlers
 
-		self._dependencies:      DependencyContainer                    = dependencies
-		self._on_error_func:     Callable[[Exception], Awaitable[None]] = on_error_func
-		self._on_unknow_command: Callable                               = on_unknow_command
-		self._command_prefix:    str                                    = command_prefix
+		self._dependencies:       DependencyContainer                    = dependencies
+		self._command_prefix:     str                                    = command_prefix
+		self._on_unknown_command: Callable                               = on_unknown_command
+		self._on_error_func:      Callable[[Exception], Awaitable[None]] = on_error_func
 	
 	
 	async def handler(self):
@@ -81,12 +110,11 @@ class CommandHandler:
 			command_name   = command_name,
 			command_args   = command_args,
 		)
-
+		
 		assert dependencies is self._dependencies
 		assert dependencies.get('raw_user_input') is raw_user_input
 		assert dependencies.get('command_name')   is command_name
 		assert dependencies.get('command_args')   is command_args
-
 
 		try:
 			while True:
@@ -100,7 +128,7 @@ class CommandHandler:
 
 
 				if command_name.value not in self._command_handlers:
-					self._on_unknow_command()
+					self._on_unknown_command()
 					continue
 
 				command_func: Callable = self._command_handlers[command_name.value]

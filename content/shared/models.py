@@ -13,9 +13,9 @@ class AddressModel(BaseModel):
 	port: int
 
 class ClientModel(BaseModel):
-	info:   InfoModel | None
-	adress: AddressModel
-	state:  ClientState
+	info:    InfoModel | None
+	address: AddressModel
+	state:   ClientState
 
 class ClientsModel(BaseModel):
 	clients: Dict[str, ClientModel]

@@ -1,17 +1,17 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from asyncio  import Task, CancelledError
-from typing   import Dict, Callable, Awaitable, Any, Literal, Union
+from typing   import Dict, Callable, Awaitable, Literal
 from enum     import Enum
 import asyncio
 
 from content.shared.dependencies import DependencyContainer, Ref
 from content.shared.info_enums   import ClientState
-from content.shared.models       import ClientModel, FileInfoModel
+from content.shared.models       import ClientModel
 from content.shared.utils        import print_notify, NotifyType
 
 
 
-class WebSocketInterface():
+class WebSocketInterface:
 	def __init__(
 			self,
 			*,
@@ -30,17 +30,17 @@ class WebSocketInterface():
 		await self._send(data)
 
 class MessageType(Enum):
-	CLIENT_CONNECTED      = 'client.connected'
-	CLIENT_DISCONNECTED   = 'client.disconnected'
-	CLIENT_STATUS_CHANGED = 'client.status_changed'
+	CLIENT_CONNECTED      = 'client_connected'
+	CLIENT_DISCONNECTED   = 'client_disconnected'
+	CLIENT_STATUS_CHANGED = 'client_status_changed'
 
-	FILE_FORWARDING_REQUEST = 'file_forwarding.request'
-	FILE_FORWARDING_ACCEPT  = 'file_forwarding.accept'
+	FILE_FORWARDING_REQUEST = 'file_forwarding_request' # Client -> Server
+	FILE_FORWARDING_ACCEPT  = 'file_forwarding_accept'  # Server -> Client
 
 class MessageModel(BaseModel):
 	type: MessageType = Field(frozen=True)
 
-class MessageHandler():
+class MessageHandler:
 	"""
 	#### Зависимости по умолчанию:
 		`websocket: WebSocketInterface` - вебсокет. 
@@ -53,7 +53,7 @@ class MessageHandler():
 
 	:param dependencies: Зависимости для обработчиков. Добавляемые по умолчанию объекты описаны выше.
 
-	:param on_error_func: Асинхронный вызываемый объект, вызываемый при необработанномисключении
+	:param on_error_func: Асинхронный вызываемый объект, вызываемый при необработанном исключении
 		в коде обработчика.	Если ничего не указанно - используется своя асинхронная функция,
 		на основе `print_notify` с режимом `ERRO`.
 
@@ -62,7 +62,7 @@ class MessageHandler():
 	
 	def __init__(
 			self,
-			message_handlers: Dict[MessageType, Callable[..., None]],
+			message_handlers: Dict[MessageType, Callable[..., Awaitable]],
 			websocket:        WebSocketInterface,
 			*,
 			dependencies:  DependencyContainer = DependencyContainer(),
@@ -105,29 +105,30 @@ class MessageHandler():
 
 		ws: WebSocketInterface = self._websocket
 
-		def on_error(ex: Exception):
-			'''Нужно вызывать при ошибке, если её нужно как-то обработать'''
+		def on_error(error: Exception):
+			"""Нужно вызывать при ошибке, если её нужно как-то обработать"""
 			nonlocal error_handling
 
 			message_handling.cancel()
 
 			if self._on_error_func:
-				error_handling = asyncio.create_task(self._on_error_func(ex))
+				error_handling = asyncio.create_task(self._on_error_func(error))
 
 
 		async with asyncio.timeout(self._timeout):
 			try:
 				while True:
-					received_data = await ws.receive()
+					received_data.value = await ws.receive()
 
-					try:    message_type = MessageModel.model_validate_json(received_data).type
-					except:	continue
+					try:    message_type = MessageModel.model_validate_json(received_data.value).type
+					except ValidationError:
+						continue
 
 					if message_type not in self._message_handlers: continue
 
 
-					handl_function: Callable = self._message_handlers[message_type]
-					message_handling: Task = asyncio.create_task(handl_function(**dependencies.resolve(handl_function)))	
+					handle_function: Callable = self._message_handlers[message_type]
+					message_handling: Task = asyncio.create_task(handle_function(**dependencies.resolve(handle_function)))
 
 
 					try: await message_handling
@@ -163,7 +164,7 @@ class MessageHandler():
 
 
 
-## MARK: Dirrectly messages
+## MARK: Directly messages
 
 class ClientDisconnectedMessage(MessageModel):
 	type: Literal[MessageType.CLIENT_DISCONNECTED] = Field(default=MessageType.CLIENT_DISCONNECTED, frozen=True)

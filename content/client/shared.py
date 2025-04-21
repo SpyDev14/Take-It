@@ -29,7 +29,7 @@ def print_client(client: ClientModel, *, label: str | None = None):
 
 	# просто чтобы чуть ниже было всё красиво и легкочитаемо
 	name: str = client.info.user_name
-	adress: str = f"{client.adress.host}:{client.adress.port}"
+	adress: str = f"{client.address.host}:{client.address.port}"
 	state: str = client.state.name
 
 	msg_lines: List[str] = [
