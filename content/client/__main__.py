@@ -16,14 +16,15 @@ from content.shared.models           import ClientModel, ClientsModel
 from content.shared.config           import INVALID_CHARACTERS
 from content.shared.utils            import is_null_or_whitespace, print_notify, NotifyType
 from content.shared.info             import Info, is_valid_name
-import msg_handlers as handl
+import exeption_handling as exeption_handl
+import message_handlers  as handl
 
 
 colorama.init(convert=True)
 DEBUG: bool = True
 
 
-##MARK: RECIEVER LOGIC
+##MARK: RECEIVER LOGIC
 async def receiver_logic(websocket: WebSocketInterface):
 	anim_task = asyncio.create_task(play_symbol_animation("Ожидание файла"))
 	try:
@@ -157,10 +158,11 @@ async def main():
 
 		server_ip: Ref[str] = Ref('127.0.0.1:8000')
 		user_name = str(randint(-16384, 16384))
-		work_mode = WorkMode.SENDER
+		# work_mode = WorkMode.SENDER
 
 
 	##MARK: START
+	anim_task: Task | None = None
 	try:
 		print(f"\nДобро пожаловать в {Fore.CYAN}Take It{Fore.RESET}!\n")
 
@@ -230,26 +232,32 @@ mode: {Fore.CYAN}{current_user_info.work_mode.name}{Fore.RESET}
 			logic: Callable[..., Awaitable] = client_logics[current_user_info.work_mode]
 			await logic(**dependencies.resolve(logic))
 
-
 	# ошибки, которые могут возникнуть до подключения
-	except (TimeoutError, ConnectionRefusedError) as e:
-		anim_task.cancel()
-		await anim_task
+	except* (TimeoutError, ConnectionRefusedError) as eg:
+		if anim_task:
+			anim_task.cancel()
+			await anim_task
 		
-		if isinstance(e, TimeoutError):
-			print_notify("Превышено время ожидания ответа от сервера", NotifyType.FATL)
-		else:
-			print_notify("Сервер не доступен", NotifyType.FATL)
+		for ex in eg.exceptions:
+			if isinstance(ex, TimeoutError):
+				print_notify("Превышено время ожидания ответа от сервера", NotifyType.FATL)
+			else:
+				print_notify("Сервер не доступен", NotifyType.FATL)
 		
 	# ошибки, которые могут возникнуть после подключения
-	except ConnectionClosedOK as e:
-		print_notify(f"Соединение закрыто успешно с кодом {e.code}")
-	except (ConnectionClosed, ConnectionClosedError) as e:
-		print_notify(f"Соединение разорванно с кодом {e.code}{(f", причина: '{e.reason}'" if e.reason else "")}", NotifyType.FATL)
+	except* ConnectionClosedOK as eg:
+		for ex in eg.exceptions:
+			print_notify(f"Соединение закрыто успешно с кодом {ex.code}")
+	except* (ConnectionClosed, ConnectionClosedError) as eg:
+		for ex in eg.exceptions:
+			print_notify(
+				f"Соединение разорвано с кодом {ex.code}{(f", причина: \"{ex.reason}\"." if ex.reason else '')}",
+				NotifyType.FATL
+			)
 
-	# ошибка закрытия приложения через ctrl+c
-	except KeyboardInterrupt:
-		import sys
-		sys.exit()
-
-asyncio.run(main())
+try:
+	asyncio.run(main())
+# ошибка закрытия приложения через ctrl+c
+except (KeyboardInterrupt, EOFError):
+	import sys
+	sys.exit()

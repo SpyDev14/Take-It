@@ -6,4 +6,4 @@ def test_message_type_consistency():
 		name: str = msg_type.name.lower().replace('.','_')
 		value: str = msg_type.value
 
-	assert value == name, f"Inconsistent name and value in MessageType: {value} != {name}"
+		assert value == name, f"Inconsistent name and value in MessageType: {value} != {name}"

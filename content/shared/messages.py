@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field, ValidationError
 from asyncio  import Task, CancelledError
-from typing   import Dict, Callable, Awaitable, Literal
+from typing   import Dict, List, Callable, Awaitable, Literal
 from enum     import Enum
 import asyncio
 
 from content.shared.dependencies import DependencyContainer, Ref
 from content.shared.info_enums   import ClientState
-from content.shared.models       import ClientModel
+from content.shared.models       import ClientModel, FileInfoModel, FileChunkInfoModel, InfoModel
 from content.shared.utils        import print_notify, NotifyType
 
 
@@ -30,12 +30,14 @@ class WebSocketInterface:
 		await self._send(data)
 
 class MessageType(Enum):
-	CLIENT_CONNECTED      = 'client_connected'
-	CLIENT_DISCONNECTED   = 'client_disconnected'
-	CLIENT_STATUS_CHANGED = 'client_status_changed'
+	CLIENT_CONNECTED      = 'client_connected'      # Server -> Client
+	CLIENT_DISCONNECTED   = 'client_disconnected'   # Server -> Client
+	CLIENT_STATUS_CHANGED = 'client_status_changed' # Server -> Client
 
-	FILE_FORWARDING_REQUEST = 'file_forwarding_request' # Client -> Server
-	FILE_FORWARDING_ACCEPT  = 'file_forwarding_accept'  # Server -> Client
+	FILE_FORWARDING_REQUEST        = 'file_forwarding_request'        # Client -> Server
+	FILE_FORWARDING_ACCEPT         = 'file_forwarding_accept'         # Server -> Client
+	FILE_FORWARDING_REJECTED       = 'file_forwarding_rejected'       # Server -> Client
+	FILE_FORWARDING_CHUNK_RECEIVED = 'file_forwarding_chunk_received' # Server -> Client
 
 class MessageModel(BaseModel):
 	type: MessageType = Field(frozen=True)
@@ -71,6 +73,7 @@ class MessageHandler:
 		):
 
 		if websocket not in dependencies:
+			assert websocket not in dependencies._dependencies
 			dependencies.add(websocket = websocket)
 		assert dependencies.get('websocket') is websocket
 
@@ -99,7 +102,15 @@ class MessageHandler:
 		error_handling:   Task | None = None
 
 		dependencies: DependencyContainer = self._dependencies
-		dependencies.add(received_data = received_data)
+		
+		if received_data not in dependencies:
+			print(
+				str(dependencies._dependencies)
+				.replace('{', '{\n')
+				.replace('}', '\n}')
+				.replace(',',',\n')
+			)
+			dependencies.add(received_data = received_data)
 
 		assert dependencies.get('received_data') is received_data
 
@@ -153,6 +164,10 @@ class MessageHandler:
 				
 				if error_handling:
 					await error_handling
+					
+			except KeyboardInterrupt:
+				import sys
+				sys.exit(0)
 	
 	@property
 	def websocket(self) -> WebSocketInterface:
@@ -163,37 +178,75 @@ class MessageHandler:
 		return self._dependencies
 
 
-
 ## MARK: Directly messages
-
 class ClientDisconnectedMessage(MessageModel):
-	type: Literal[MessageType.CLIENT_DISCONNECTED] = Field(default=MessageType.CLIENT_DISCONNECTED, frozen=True)
+	"""Server -> Client"""
+	type: Literal[MessageType.CLIENT_DISCONNECTED] = Field(
+		default = MessageType.CLIENT_DISCONNECTED,
+		frozen = True
+	)
 
 	disconnected_client: ClientModel
 
 class ClientConnectedMessage(MessageModel):
-	type: Literal[MessageType.CLIENT_CONNECTED] = Field(default=MessageType.CLIENT_CONNECTED, frozen=True)
+	"""Server -> Client"""
+	type: Literal[MessageType.CLIENT_CONNECTED] = Field(
+		default = MessageType.CLIENT_CONNECTED,
+		frozen  = True
+	)
 
 	connected_client: ClientModel
 
 class ClientStatusChangedMessage(MessageModel):
-	type: Literal[MessageType.CLIENT_STATUS_CHANGED] = Field(default=MessageType.CLIENT_STATUS_CHANGED, frozen=True)
+	"""Server -> Client"""
+	type: Literal[MessageType.CLIENT_STATUS_CHANGED] = Field(
+		default = MessageType.CLIENT_STATUS_CHANGED,
+		frozen  = True
+	)
 
 	client:    ClientModel
 	new_state: ClientState
 	old_state: ClientState
 
-"""
-class FileSendingStartMessage(MessageModel):
-	type: Literal[MessageType.FILE_FORWARDING_REQUEST] = Field(default=MessageType.FILE_FORWARDING_REQUEST, frozen=True)
 
-	receiver: ClientModel
-	sender:   ClientModel
+class FileForwardingRequestMessage(MessageModel):
+	"""Client -> Server"""
+	type: Literal[MessageType.FILE_FORWARDING_REQUEST] = Field(
+		default = MessageType.FILE_FORWARDING_REQUEST,
+		frozen  = True
+	)
 
-	file_info: FileInfoModel
+	requested_receiver: ClientModel
+	sender_info:        InfoModel
 
-class FileSendingAcceptMessage(MessageModel):
-	type: Literal[MessageType.FILE_FORWARDING_ACCEPT] = Field(default=MessageType.FILE_FORWARDING_ACCEPT, frozen=True)
+	files: List[FileInfoModel]
 
-	chunk_size: int
-"""
+class FileForwardingAcceptMessage(MessageModel):
+	"""Server -> Client"""
+	type: Literal[MessageType.FILE_FORWARDING_ACCEPT] = Field(
+		default = MessageType.FILE_FORWARDING_ACCEPT,
+		frozen  = True
+	)
+
+	chunk_size:   int
+	chunks_count: int
+	
+class FileForwardingRejectedMessage(MessageModel):
+	"""Server -> Client"""
+	type: Literal[MessageType.FILE_FORWARDING_REJECTED] = Field(
+		default = MessageType.FILE_FORWARDING_REJECTED,
+		frozen  = True
+	)
+
+	reason: str
+
+class FileForwardingFileChunkReceivedMessage(MessageModel):
+	"""Server -> Client"""
+	type: Literal[MessageType.FILE_FORWARDING_CHUNK_RECEIVED] = Field(
+		default = MessageType.FILE_FORWARDING_CHUNK_RECEIVED,
+		frozen  = True
+	)
+
+	chunk_info: FileChunkInfoModel
+	check_hash: str
+	

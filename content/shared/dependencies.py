@@ -7,9 +7,9 @@ _T = TypeVar('_T')
 
 class Ref(Generic[_T]):
 	"""
-	Является классом-обёрткой для "создания ссылок" на неизменяемые типы (`int`, `str`, `bool`, `tuple`, ...). Нужен для работы с `DependencyContainer`.
-	Создать ссылку на неизменяемый объект с помощью него не получится, так как при создании такой объект
-	скопируется в аргументы.
+	Является классом-обёрткой для "создания ссылок" на неизменяемые типы (`int`, `str`, `bool`, `tuple`, ...).
+	Нужен для работы с `DependencyContainer`. Создать ссылку на уже существующий неизменяемый объект с помощью
+	него не получится, так как при создании такой объект скопируется в аргументы конструктора.
 
 	## Осторожно!
 	Значение находится в поле `value`! Ref - объект с полем `value`! (Можно запутаться)
@@ -78,7 +78,7 @@ class DependencyContainer:
 
 	### Неизменяемые типы не поддерживаются:
 	```
-	bool, int, float, complex, tuple, str, frozenset, bytes
+	bool, int, float, complex, tuple, str, frozenset, bytes, range, None
 	```
 	Используйте `Ref()` обёртку для подобных типов.
 	Это связанно с тем, что на неизменяемые типы не может быть ссылок,
@@ -98,23 +98,23 @@ class DependencyContainer:
 		funny_func(**dependencies.resolve(funny_func))
 	```
 
-	:raise ImmutableDependencyTypeError: В конструктор был передан неизменяемый тип, который несовместим с DependencyContainer.
+	:raise ImmutableDependencyTypeError: В конструктор был передан объект
+	неизменяемого типа, который несовместим с DependencyContainer.
 	"""
 
 	# Неизменяемые типы, т.е те, при присваивании которых получается копия, а не ссылка
-	# x = 10; y = x;    y is x   == False <- копирование
-	# arr = [1,2,3]
-	# arr2 = arr   ; arr2 is arr == True  <- создание ссылки, подходит
+	# Для работы с ними нужно использовать Ref()
 	_IMMUTABLE_TYPES: Set[Type] = (
-		bool,
-		int,
-		float,
-		complex,
-		tuple,
-		str,
 		frozenset,
+		complex,
 		bytes,
-		None
+		float,
+		tuple,
+		range,
+		bool,
+		None,
+		int,
+		str
 	)
 
 	def __check_dependency_object_type_mutable(self, name, dependency):
@@ -142,11 +142,14 @@ Immutable (unsupported) types: {', '.join({str(immutable_type) for immutable_typ
 
 		assert self.get('this_dependency_container') is self
 
-	def __len__(self):
+	def __len__(self) -> int:
 		return len(self._dependencies)
 	
-	def __contains__(self, dependency):
-		return dependency in self._dependencies.values()
+	def __contains__(self, dependency: Any | str) -> bool:
+		if isinstance(dependency, str):
+			return dependency in self._dependencies
+		else:
+			return dependency in self._dependencies.values()
 	
 	def __copy__(self) -> Self:
 		new_deps = DependencyContainer(
@@ -173,7 +176,7 @@ Immutable (unsupported) types: {', '.join({str(immutable_type) for immutable_typ
 		for name, new_dependency in new_dependencies.items():
 			self.__check_dependency_object_type_mutable(name, new_dependency)
 
-			if name in self._dependencies:
+			if name in self:
 				conflict_dependencies.append(name)
 				continue
 
@@ -181,12 +184,13 @@ Immutable (unsupported) types: {', '.join({str(immutable_type) for immutable_typ
 		
 		if conflict_dependencies:
 			raise KeyError(
-				f"Dependency '{conflict_dependencies[0]}' is already there" if len(conflict_dependencies) == 1
-				else f"The dependencies {', '.join(conflict_dependencies)} already exist."
+				f"Dependency '{conflict_dependencies[0]}' is already in the DependencyContainer" if len(conflict_dependencies) == 1
+				else f"The dependencies {', '.join(conflict_dependencies)} already in the DependencyContainer."
 			)
 
 		self._dependencies.update(dependencies_to_adding)
-
+		
+	'''
 	def remove(self, name: str):
 		"""
 		Удаляет зависимость
@@ -198,7 +202,7 @@ Immutable (unsupported) types: {', '.join({str(immutable_type) for immutable_typ
 			raise KeyError(f"Dependency '{name}' does not exist")
 		
 		del self._dependencies[name]
-
+	'''
 
 	def get(self, name: str) -> Any | None:
 		"""Возвращает зависимость по имени. Вернёт `None`, если такой зависимости нет."""
@@ -208,8 +212,7 @@ Immutable (unsupported) types: {', '.join({str(immutable_type) for immutable_typ
 
 	def resolve(
 			self,
-			customer: Callable,
-			# temp_dependencies: Dict[str, Any] | None = None
+			customer: Callable
 		):
 		"""
 		Возвращает словарь с зависимостями, необходимыми для выполнения функции, если таковые есть.
@@ -235,26 +238,21 @@ Immutable (unsupported) types: {', '.join({str(immutable_type) for immutable_typ
 		:raise MissingDependencyError: Одной или нескольких зависимостей в контейнере не хватает.
 			В ошибке пропишет каких не хватает и какие есть.
 		"""
-
-		dependencies: DependencyContainer = copy.copy(self)
-
-		# if temp_dependencies:
-		# 	dependencies.add(**temp_dependencies)
-
+		
 		required_dependencies: Dict[str, Any] = dict()
 		missing_dependencies:  List[str]      = list()
 
-		for required_dependency in inspect.signature(customer).parameters:
-			if required_dependency not in dependencies:
-				missing_dependencies.append(required_dependency)
+		for required_parameter in inspect.signature(customer).parameters:
+			if required_parameter not in self:
+				missing_dependencies.append(required_parameter)
 				continue
 				
-			required_dependencies[required_dependency] = dependencies.get(required_dependency)
+			required_dependencies[required_parameter] = self.get(required_parameter)
 			
 		if missing_dependencies:
 			raise MissingDependencyError(
-				f"Necessary dependencies are missing: {', '.join(missing_dependencies)}.\n" +
-				f"Available dependencies: {', '.join(dependencies._dependencies)}"
+				f"\nNecessary dependencies are missing: {', '.join(sorted(missing_dependencies))}.\n" +
+				f"Available dependencies: {', '.join(sorted(self._dependencies))}"
 			)
 
 		return required_dependencies

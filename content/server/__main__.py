@@ -2,7 +2,7 @@ from fastapi.websockets import WebSocket, WebSocketDisconnect
 from fastapi.responses  import JSONResponse
 from fastapi            import FastAPI
 from pydantic           import ValidationError
-import asyncio
+import asyncio, traceback
 
 from content.server.exceptions import ClientSideError
 from content.server.client     import Client, ClientManager
@@ -50,8 +50,8 @@ async def websocket_endpoint(ws: WebSocket):
 			)
 		)
 
-		ws_message_handling = asyncio.create_task(message_handler.handler())
-		await ws_message_handling
+		# ws_message_handling = asyncio.create_task(message_handler.handler())
+		# await ws_message_handling
 
 		
 	except WebSocketDisconnect:
@@ -59,16 +59,18 @@ async def websocket_endpoint(ws: WebSocket):
 
 	except ClientSideError as ex:
 		await manager.disconnect(client, 1002, ex.description)
-		print_notify(ex.description, NotifyType.ERRO)
+		print_notify(f"{type(ex).__name__}{f': {ex.description}' if ex.description else ''}", NotifyType.ERRO)
 
 	except Exception as ex:
-		await manager.disconnect(client, 1011, str(ex) if ex.args else None)
-		print_notify(ex, NotifyType.ERRO)
+		reason: str = f"{type(ex).__name__}{f': {', '.join(ex.args)}' if len(ex.args) > 0 else ''}"
+		await manager.disconnect(client, 1011, reason)
+		print_notify(reason, NotifyType.ERRO)
+		traceback.print_exc()
 
 @app.get('/clients/')
 async def get_clients():
 	return JSONResponse(
 		ClientsModel(
-			clients = { name: client.to_model() for name, client in manager._clients.items() }
+			clients = { name: client.to_model() for name, client in manager.clients.items() }
 		).model_dump(mode='json')
 	)

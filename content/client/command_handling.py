@@ -6,8 +6,10 @@ import asyncio, shlex, copy
 
 from content.shared.dependencies import DependencyContainer, Ref
 from content.shared.messages     import WebSocketInterface
-from content.shared.models       import ClientModel, AddressModel
+from content.shared.messages     import FileForwardingRequestMessage
+from content.shared.models       import ClientModel, AddressModel, FileInfoModel
 from content.shared.utils        import is_null_or_whitespace, print_notify, NotifyType
+from content.shared.info         import Info
 from content.client.shared       import print_send_file_command_info, incorrect_input
 
 
@@ -15,7 +17,8 @@ from content.client.shared       import print_send_file_command_info, incorrect_
 async def send_command(
 		command_args: List[str],
 		suitable_clients: Dict[str, ClientModel],
-		websocket: WebSocketInterface
+		websocket: WebSocketInterface,
+		current_user_info: Info
 	):
 	if len(command_args) < 2:
 		raise Exception('Необходимо указать <имя\\адрес клиента> и <путь до файла\\папки>')
@@ -49,8 +52,18 @@ async def send_command(
 	assert receiver and path
 	
 	
-	files_for_sending: None  # Нужна модель
-	await websocket.send('') # Отправка запроса на пересылку файла
+	files_for_sending: List[FileInfoModel] = []
+	
+	print_notify('send command not implemented :(', NotifyType.DEBG)
+
+	#...
+	# await websocket.send(
+	# 	FileForwardingRequestMessage(
+	# 		requested_receiver = receiver,
+	# 		sender_info = current_user_info.to_model(), #!!!
+	# 		files  = files_for_sending,
+	# 	).model_dump_json()
+	# )
 
 
 async def help_command():
@@ -141,4 +154,5 @@ class CommandHandler:
 			pass
 
 		except (EOFError, KeyboardInterrupt):
-			pass
+			import sys
+			sys.exit(0)

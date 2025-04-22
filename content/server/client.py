@@ -2,10 +2,11 @@ from starlette.datastructures import Address
 from fastapi.websockets       import WebSocket, WebSocketState
 from pydantic                 import ValidationError
 from typing                   import Dict, Set
+import  copy
 
 from content.server.exceptions import ClientSideError
 from content.shared.info_enums import ClientState
-from content.shared.messages import MessageModel, MessageType
+from content.shared.messages   import MessageModel
 from content.shared.messages   import ClientConnectedMessage, ClientDisconnectedMessage
 from content.shared.models     import ClientModel, AddressModel
 from content.shared.config     import INVALID_CHARACTERS
@@ -32,7 +33,11 @@ class Client:
 class ClientManager:
 	def __init__(self):
 		self._clients: Dict[str, Client] = dict()
-
+	
+	@property
+	def clients(self):
+		"""Вернёт копию словаря клиентов, а не сам словарь."""
+		return copy.copy(self._clients)
 
 	## Sending
 	@classmethod
@@ -45,12 +50,27 @@ class ClientManager:
 		:raise ValueError: `message` - не валидная MessageModel модель.
 		"""
 		
-		message: str = cls.__check_message(message)
+		if not isinstance(message, MessageModel | str):
+			raise TypeError(f'Expected MessageModel or str, got {type(message).__name__}')
+		
+		if isinstance(message, str):
+			try:   MessageModel.model_validate_json(message)
+			except ValidationError:
+				raise ValueError(f'Message \'{message}\' is not valid MessageModel')
+			
+		elif isinstance(message, MessageModel):
+			message: str = message.model_dump_json()
 		
 		return message
 	
 	@classmethod
-	async def send_personal_message(cls, client: Client, message: str | MessageModel) -> None:
+	async def send_personal_message(
+			cls,
+			client: Client,
+			message: str | MessageModel,
+			*,
+			check_message: bool = True
+		) -> None:
 		"""Отправит персональное json-сообщение клиенту"""
 		
 		message: str = cls.__check_message(message)
@@ -79,7 +99,7 @@ class ClientManager:
 				if client in exclude_clients:
 					continue
 
-			await self.send_personal_message(client, message)
+			await self.send_personal_message(client, message, check_message = False)
 
 
 	## Connection
@@ -129,7 +149,10 @@ class ClientManager:
 	## Disconnect
 	async def on_disconnect(self, client: Client) -> None:
 		"""Действия при отключении клиента. Должен быть вызван, если клиент был отключён"""
-		if client.info.user_name not in self._clients:
+		# Клиент ещё даже не авторизовался
+		if not client.info:
+			return
+		elif client.info.user_name not in self._clients:
 			return
 		
 		del self._clients[client.info.user_name]

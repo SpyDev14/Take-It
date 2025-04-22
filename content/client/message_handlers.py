@@ -22,7 +22,7 @@ async def on_client_connected(
 		suitable_clients: Dict[str, ClientModel],
 		current_user_info: Info
 	):
-	client: ClientModel = ClientConnectedMessage.model_validate_json(received_data).connected_client
+	client: ClientModel = ClientConnectedMessage.model_validate_json(received_data.value).connected_client
 	
 	if not is_client_suitable(client, current_user_info):
 		return
@@ -51,7 +51,7 @@ async def on_client_status_changed(
 		received_data: Ref[str | bytes]
 	):
 
-	msg = ClientStatusChangedMessage.model_validate_json(received_data)
+	msg = ClientStatusChangedMessage.model_validate_json(received_data.value)
 
 	print_notify(
 		'Статус {client} изменён с {old} на {new}.'
@@ -61,4 +61,13 @@ async def on_client_status_changed(
 			new    = f'{Fore.CYAN   }{msg.new_state.name       }{Fore.RESET}'
 		)
 	)
-	
+
+
+async def on_file_forwarding_accept(this_dependency_container: DependencyContainer):
+	await plug(**this_dependency_container.resolve(plug))
+
+async def on_file_forwarding_rejected(this_dependency_container: DependencyContainer):
+	await plug(**this_dependency_container.resolve(plug))
+
+async def on_file_forwarding_chunk_received(this_dependency_container: DependencyContainer):
+	await plug(**this_dependency_container.resolve(plug))
